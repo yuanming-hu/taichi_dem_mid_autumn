@@ -1,7 +1,7 @@
 # Taichi DEM
 A minimal DEM simulation demo written in Taichi.
 
-<img src="https://raw.githubusercontent.com/taichi-dev/public_files/master/taichi_dem/demo.gif" height="270px">
+![](./demo.gif)
 
 > To implement your own version, click the "Use this template" button on this page and simply modify the `dem.py` script.
 
