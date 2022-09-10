@@ -8,7 +8,7 @@ vec = ti.math.vec2
 SAVE_FRAMES = False
 
 window_size = 1024  # Number of pixels of the window
-n = 8192  # Number of grains
+max_n = 1024 * 1024  # Maximum number of grains
 
 density = 100.0
 stiffness = 8e3
@@ -28,30 +28,32 @@ class Grain:
     f: vec  # Force
 
 
-gf = Grain.field(shape=(n, ))
+gf = Grain.field(shape=(max_n, ))
+num_grains = ti.field(dtype=ti.i32, shape=())
 
-grid_n = 128
+grid_n = 64
 grid_size = 1.0 / grid_n  # Simulation domain of size [0, 1]
 print(f"Grid size: {grid_n}x{grid_n}")
 
-grain_r_min = 0.002
-grain_r_max = 0.003
+grain_r_min = 0.003
+grain_r_max = 0.004
 
 assert grain_r_max * 2 < grid_size
 
 
 @ti.kernel
-def init():
-    for i in gf:
-        # Spread grains in a restricted area.
-        l = i * grid_size
-        padding = 0.1
-        region_width = 1.0 - padding * 2
-        pos = vec(l % region_width + padding + grid_size * ti.random() * 0.2,
-                  l // region_width * grid_size + 0.3)
-        gf[i].p = pos
-        gf[i].r = ti.random() * (grain_r_max - grain_r_min) + grain_r_min
-        gf[i].m = density * math.pi * gf[i].r**2
+def init(img: ti.types.ndarray()):
+    sample_res = 128
+    for x in range(sample_res):
+        for y in range(sample_res):
+            # Spread grains in a restricted area.
+            if img[x * 8, y * 8, 0] != 255:
+                i = ti.atomic_add(num_grains[None], 1)
+                gf[i].p = vec(x / sample_res, y / sample_res)
+                gf[i].r = ti.random() * (grain_r_max -
+                                         grain_r_min) + grain_r_min
+                gf[i].m = density * math.pi * gf[i].r**2
+    print(num_grains[None])
 
 
 @ti.kernel
@@ -115,7 +117,7 @@ grain_count = ti.field(dtype=ti.i32,
                        name="grain_count")
 column_sum = ti.field(dtype=ti.i32, shape=grid_n, name="column_sum")
 prefix_sum = ti.field(dtype=ti.i32, shape=(grid_n, grid_n), name="prefix_sum")
-particle_id = ti.field(dtype=ti.i32, shape=n, name="particle_id")
+particle_id = ti.field(dtype=ti.i32, shape=max_n, name="particle_id")
 
 
 @ti.kernel
@@ -123,12 +125,12 @@ def contact(gf: ti.template()):
     '''
     Handle the collision between grains.
     '''
-    for i in gf:
+    for i in range(num_grains[None]):
         gf[i].f = vec(0., gravity * gf[i].m)  # Apply gravity.
 
     grain_count.fill(0)
 
-    for i in range(n):
+    for i in range(num_grains[None]):
         grid_idx = ti.floor(gf[i].p * grid_n, int)
         grain_count[grid_idx] += 1
 
@@ -157,7 +159,7 @@ def contact(gf: ti.template()):
             list_cur[linear_idx] = list_head[linear_idx]
             list_tail[linear_idx] = prefix_sum[i, j]
 
-    for i in range(n):
+    for i in range(num_grains[None]):
         grid_idx = ti.floor(gf[i].p * grid_n, int)
         linear_idx = grid_idx[0] * grid_n + grid_idx[1]
         grain_location = ti.atomic_add(list_cur[linear_idx], 1)
@@ -171,7 +173,7 @@ def contact(gf: ti.template()):
     '''
 
     # Fast collision detection
-    for i in range(n):
+    for i in range(num_grains[None]):
         grid_idx = ti.floor(gf[i].p * grid_n, int)
         x_begin = max(grid_idx[0] - 1, 0)
         x_end = min(grid_idx[0] + 2, grid_n)
@@ -189,7 +191,8 @@ def contact(gf: ti.template()):
                         resolve(i, j)
 
 
-init()
+source = ti.tools.imread('source.png')
+init(source)
 gui = ti.GUI('Taichi DEM', (window_size, window_size))
 step = 0
 
