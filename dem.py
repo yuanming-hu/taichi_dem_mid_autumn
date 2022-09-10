@@ -1,5 +1,6 @@
 import taichi as ti
 import math
+import numpy as np
 import os
 
 ti.init(arch=ti.gpu)
@@ -8,10 +9,10 @@ vec = ti.math.vec2
 SAVE_FRAMES = False
 
 window_size = 1024  # Number of pixels of the window
-max_n = 1024 * 1024  # Maximum number of grains
+max_n = 1024 * 16  # Maximum number of grains
 
 density = 100.0
-stiffness = 8e3
+stiffness = 8
 restitution_coef = 0.001
 gravity = -9.81
 dt = 0.0001  # Larger dt might lead to unstable results.
@@ -40,6 +41,16 @@ grain_r_min = 0.003
 grain_r_max = 0.004
 
 assert grain_r_max * 2 < grid_size
+
+collider_radius = 0.05
+num_colliders = 9
+colliders = ti.Vector.field(2, dtype=ti.f32, shape=num_colliders)
+
+for i in range(4):
+    colliders[i] = [0.2 + 0.2 * i, 0.42]
+
+for i in range(4, 9):
+    colliders[i] = [0.1 + 0.2 * (i - 4), 0.27]
 
 
 @ti.kernel
@@ -89,6 +100,14 @@ def apply_bc():
             gf[i].p[0] = 1.0 - gf[i].r
             gf[i].v[0] *= -bounce_coef
 
+        for j in range(num_colliders):
+            delta = (gf[i].p - colliders[j]).norm() - (gf[i].r +
+                                                       collider_radius)
+            if delta < 0:
+                normal = (gf[i].p - colliders[j]).normalized()
+                gf[i].v -= normal * min(normal.dot(gf[i].v), 0)
+                gf[i].p -= delta * normal
+
 
 @ti.func
 def resolve(i, j):
@@ -97,7 +116,7 @@ def resolve(i, j):
     delta = -dist + gf[i].r + gf[j].r  # delta = d - 2 * r
     if delta > 0:  # in contact
         normal = rel_pos / dist
-        f1 = normal * delta * stiffness
+        f1 = normal * delta * stiffness * 1000
         # Damping force
         M = (gf[i].m * gf[j].m) / (gf[i].m + gf[j].m)
         K = stiffness
@@ -194,7 +213,8 @@ def contact(gf: ti.template()):
 
 source = ti.tools.imread('source.png')
 init(source)
-gui = ti.GUI('Taichi DEM', (window_size, window_size))
+gui = ti.GUI('Taichi DEM', (window_size, window_size),
+             background_color=0x000022)
 step = 0
 
 if SAVE_FRAMES:
@@ -208,6 +228,9 @@ while gui.running:
     pos = gf.p.to_numpy()
     r = gf.r.to_numpy() * window_size
     gui.circles(pos, radius=r, color=gf.c.to_numpy())
+    gui.circles(colliders.to_numpy(),
+                radius=collider_radius * window_size,
+                color=0xffff55)
     if SAVE_FRAMES:
         gui.show(f'output/{step:06d}.png')
     else:
