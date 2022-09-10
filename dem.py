@@ -26,6 +26,7 @@ class Grain:
     v: vec  # Velocity
     a: vec  # Acceleration
     f: vec  # Force
+    c: ti.u32  # Color
 
 
 gf = Grain.field(shape=(max_n, ))
@@ -45,14 +46,14 @@ assert grain_r_max * 2 < grid_size
 def init(img: ti.types.ndarray()):
     sample_res = 128
     for x in range(sample_res):
-        for y in range(sample_res):
+        for y in range(sample_res // 2, sample_res):
             # Spread grains in a restricted area.
-            if img[x * 8, y * 8, 0] != 255:
-                i = ti.atomic_add(num_grains[None], 1)
-                gf[i].p = vec(x / sample_res, y / sample_res)
-                gf[i].r = ti.random() * (grain_r_max -
-                                         grain_r_min) + grain_r_min
-                gf[i].m = density * math.pi * gf[i].r**2
+            p, q = x * 8 + 4, y * 8 + 4
+            i = ti.atomic_add(num_grains[None], 1)
+            gf[i].p = vec(p / 1024, q / 1024)
+            gf[i].r = ti.random() * (grain_r_max - grain_r_min) + grain_r_min
+            gf[i].m = density * math.pi * gf[i].r**2
+            gf[i].c = img[p, q, 0] * 65536 + img[p, q, 1] * 256 + img[p, q, 2]
     print(num_grains[None])
 
 
@@ -206,7 +207,7 @@ while gui.running:
         contact(gf)
     pos = gf.p.to_numpy()
     r = gf.r.to_numpy() * window_size
-    gui.circles(pos, radius=r)
+    gui.circles(pos, radius=r, color=gf.c.to_numpy())
     if SAVE_FRAMES:
         gui.show(f'output/{step:06d}.png')
     else:
